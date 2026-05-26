@@ -1,0 +1,431 @@
+
+import React, { useState, useMemo, useCallback } from 'react';
+import Sidebar from './components/Sidebar';
+import MediaCard from './components/MediaCard';
+import MediaViewer from './components/MediaViewer';
+import SecureVault from './components/SecureVault';
+import AlbumCard from './components/AlbumCard';
+import UploadModal from './components/UploadModal';
+import CreateAlbumModal from './components/CreateAlbumModal';
+import { useLocalStorage } from './hooks/useLocalStorage';
+import { mockMedia, mockAlbums } from './mockData';
+import { MediaItem, Album, SortOption, GridSize } from './types';
+import { formatFileSize } from './utils/fileHelpers';
+import { Search, Grid3X3, Grid2X2, SortDesc, Filter, ArrowLeft, X, Trash2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: 'date-desc', label: 'Newest First' },
+  { value: 'date-asc', label: 'Oldest First' },
+  { value: 'name-asc', label: 'Name A→Z' },
+  { value: 'name-desc', label: 'Name Z→A' },
+  { value: 'size-desc', label: 'Largest First' },
+  { value: 'size-asc', label: 'Smallest First' },
+];
+
+const FILTER_OPTIONS = [
+  { value: 'all', label: 'All Types' },
+  { value: 'image', label: 'Images Only' },
+  { value: 'video', label: 'Videos Only' },
+];
+
+const App: React.FC = () => {
+  const [activeTab, setActiveTab] = useState('photos');
+  const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null);
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    setActiveAlbumId(null);
+    if (tab !== 'locked') setIsVaultUnlocked(false);
+  };
+
+  const [media, setMedia] = useLocalStorage<MediaItem[]>('lumina-media', mockMedia);
+  const [albums, setAlbums] = useLocalStorage<Album[]>('lumina-albums', mockAlbums);
+  const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
+  const [isVaultUnlocked, setIsVaultUnlocked] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortOption, setSortOption] = useState<SortOption>('date-desc');
+  const [filterType, setFilterType] = useState<string>('all');
+  const [gridSize, setGridSize] = useState<GridSize>('small');
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showCreateAlbumModal, setShowCreateAlbumModal] = useState(false);
+  const [showSortMenu, setShowSortMenu] = useState(false);
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
+
+  const filteredMedia = useMemo(() => {
+    if (activeTab === 'albums' && activeAlbumId) {
+      const album = albums.find(a => a.id === activeAlbumId);
+      return media.filter(m => album?.mediaIds.includes(m.id));
+    }
+
+    let items = media;
+
+    if (activeTab === 'photos') items = items.filter(m => m.type === 'image' && !m.isLocked);
+    else if (activeTab === 'videos') items = items.filter(m => m.type === 'video' && !m.isLocked);
+    else if (activeTab === 'favorites') items = items.filter(m => m.isFavorite && !m.isLocked);
+    else if (activeTab === 'locked') items = items.filter(m => m.isLocked);
+    else if (activeTab === 'places') items = items.filter(m => m.location && !m.isLocked);
+    else if (activeTab === 'recent') items = items.filter(m => !m.isLocked);
+
+    // Apply type filter
+    if (filterType !== 'all') {
+      items = items.filter(m => m.type === filterType);
+    }
+
+    // Apply search
+    if (searchQuery) {
+      items = items.filter(m => 
+        m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        m.location.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+
+    // Apply sort
+    items = [...items].sort((a, b) => {
+      switch (sortOption) {
+        case 'date-desc': return new Date(b.date).getTime() - new Date(a.date).getTime();
+        case 'date-asc': return new Date(a.date).getTime() - new Date(b.date).getTime();
+        case 'name-asc': return a.title.localeCompare(b.title);
+        case 'name-desc': return b.title.localeCompare(a.title);
+        case 'size-desc': return (b.size || 0) - (a.size || 0);
+        case 'size-asc': return (a.size || 0) - (b.size || 0);
+        default: return 0;
+      }
+    });
+
+    return items;
+  }, [media, albums, activeTab, activeAlbumId, searchQuery, sortOption, filterType]);
+
+  const toggleFavorite = (id: string) => {
+    setMedia(prev => prev.map(m => m.id === id ? { ...m, isFavorite: !m.isFavorite } : m));
+  };
+
+  const toggleLock = (id: string) => {
+    setMedia(prev => prev.map(m => m.id === id ? { ...m, isLocked: !m.isLocked } : m));
+  };
+
+  const deleteMedia = (id: string) => {
+    setMedia(prev => prev.filter(m => m.id !== id));
+    // Also remove from albums
+    setAlbums(prev => prev.map(a => ({
+      ...a,
+      mediaIds: a.mediaIds.filter(mid => mid !== id),
+    })));
+  };
+
+  const handleUpload = useCallback((items: MediaItem[]) => {
+    setMedia(prev => [...items, ...prev]);
+    setActiveTab('photos');
+  }, [setMedia]);
+
+  const handleCreateAlbum = useCallback((album: Album) => {
+    setAlbums(prev => [...prev, album]);
+  }, [setAlbums]);
+
+  const handleDeleteAlbum = useCallback((albumId: string) => {
+    setAlbums(prev => prev.filter(a => a.id !== albumId));
+  }, [setAlbums]);
+
+  const handleClearData = useCallback(() => {
+    if (window.confirm('This will delete ALL your media and albums. This cannot be undone. Are you sure?')) {
+      setMedia([]);
+      setAlbums([]);
+      localStorage.removeItem('lumina-media');
+      localStorage.removeItem('lumina-albums');
+    }
+  }, [setMedia, setAlbums]);
+
+  const totalStorage = useMemo(() => {
+    const bytes = media.reduce((acc, m) => acc + (m.size || 0), 0);
+    return formatFileSize(bytes);
+  }, [media]);
+
+  const getPageTitle = () => {
+    if (activeAlbumId && activeTab === 'albums') {
+      const album = albums.find(a => a.id === activeAlbumId);
+      return album?.title || 'Album';
+    }
+    switch (activeTab) {
+      case 'photos': return 'Your Photography';
+      case 'videos': return 'Cinematic Clips';
+      case 'favorites': return 'Favorite Moments';
+      case 'albums': return 'Collections';
+      case 'locked': return 'Secure Vault';
+      case 'places': return 'Explorations';
+      case 'recent': return 'Recent Activity';
+      default: return 'Gallery';
+    }
+  };
+
+  const gridColsClass = gridSize === 'large'
+    ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
+    : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4';
+
+  return (
+    <div className="min-h-screen bg-[#050505] text-white flex">
+      <Sidebar 
+        activeTab={activeTab} 
+        setActiveTab={handleTabChange} 
+        onUpload={() => setShowUploadModal(true)}
+        onCreateAlbum={() => setShowCreateAlbumModal(true)}
+        onClearData={handleClearData}
+        mediaCount={media.length}
+        storageUsed={totalStorage}
+      />
+      
+      <main className="flex-1 ml-64 p-8 min-h-screen">
+        {/* Header */}
+        <header className="flex items-center justify-between mb-12">
+          <div className="flex items-center gap-6">
+            {activeAlbumId && (
+              <button 
+                onClick={() => setActiveAlbumId(null)}
+                className="p-3 rounded-2xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white transition-all border border-white/5"
+              >
+                <ArrowLeft size={24} />
+              </button>
+            )}
+            <div>
+              <h2 className="text-4xl font-bold tracking-tight mb-2">{getPageTitle()}</h2>
+              <p className="text-zinc-500 text-sm font-medium">
+                {activeTab === 'albums' && !activeAlbumId ? `${albums.length} albums available` : `${filteredMedia.length} items found`}
+                {filterType !== 'all' && <span className="text-indigo-400"> • {filterType}s only</span>}
+                {searchQuery && <span className="text-indigo-400"> • searching "{searchQuery}"</span>}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="relative group">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-indigo-400 transition-colors" size={18} />
+              <input 
+                type="text" 
+                placeholder="Search your library..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="bg-zinc-900/50 border border-white/5 rounded-2xl py-2.5 pl-10 pr-10 w-72 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-all text-sm"
+              />
+              {searchQuery && (
+                <button 
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            
+            {/* Grid size toggle */}
+            <div className="flex bg-zinc-900/50 rounded-2xl p-1 border border-white/5">
+              <button 
+                onClick={() => setGridSize('small')}
+                className={`p-2 rounded-xl transition-colors ${gridSize === 'small' ? 'bg-white/5 text-white' : 'text-zinc-500 hover:text-white'}`}
+                title="Small Grid"
+              >
+                <Grid3X3 size={18} />
+              </button>
+              <button 
+                onClick={() => setGridSize('large')}
+                className={`p-2 rounded-xl transition-colors ${gridSize === 'large' ? 'bg-white/5 text-white' : 'text-zinc-500 hover:text-white'}`}
+                title="Large Grid"
+              >
+                <Grid2X2 size={18} />
+              </button>
+            </div>
+
+            {/* Sort dropdown */}
+            <div className="relative">
+              <button 
+                onClick={() => { setShowSortMenu(!showSortMenu); setShowFilterMenu(false); }}
+                className={`p-2.5 rounded-2xl bg-zinc-900/50 border border-white/5 transition-all ${
+                  showSortMenu ? 'text-indigo-400 ring-1 ring-indigo-500/50' : 'text-zinc-400 hover:text-white'
+                }`}
+                title="Sort"
+              >
+                <SortDesc size={20} />
+              </button>
+              <AnimatePresence>
+                {showSortMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                    className="absolute right-0 top-12 w-48 bg-zinc-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
+                  >
+                    {SORT_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => { setSortOption(opt.value); setShowSortMenu(false); }}
+                        className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors ${
+                          sortOption === opt.value 
+                            ? 'bg-indigo-500/10 text-indigo-400' 
+                            : 'text-zinc-400 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+            
+            {/* Filter dropdown */}
+            <div className="relative">
+              <button 
+                onClick={() => { setShowFilterMenu(!showFilterMenu); setShowSortMenu(false); }}
+                className={`p-2.5 rounded-2xl bg-zinc-900/50 border border-white/5 transition-all ${
+                  showFilterMenu || filterType !== 'all' ? 'text-indigo-400 ring-1 ring-indigo-500/50' : 'text-zinc-400 hover:text-white'
+                }`}
+                title="Filter"
+              >
+                <Filter size={20} />
+              </button>
+              <AnimatePresence>
+                {showFilterMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                    className="absolute right-0 top-12 w-48 bg-zinc-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
+                  >
+                    {FILTER_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => { setFilterType(opt.value); setShowFilterMenu(false); }}
+                        className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors ${
+                          filterType === opt.value 
+                            ? 'bg-indigo-500/10 text-indigo-400' 
+                            : 'text-zinc-400 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+        </header>
+
+        {/* Content */}
+        <div className="relative" onClick={() => { setShowSortMenu(false); setShowFilterMenu(false); }}>
+          {activeTab === 'locked' && !isVaultUnlocked ? (
+            <SecureVault onUnlock={() => setIsVaultUnlocked(true)} isUnlocked={isVaultUnlocked} />
+          ) : activeTab === 'albums' && !activeAlbumId ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-8">
+              {albums.map((album) => (
+                <div key={album.id} className="relative group">
+                  <AlbumCard album={album} onClick={(a) => setActiveAlbumId(a.id)} />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`Delete album "${album.title}"? (Media won't be deleted)`)) {
+                        handleDeleteAlbum(album.id);
+                      }
+                    }}
+                    className="absolute top-3 left-3 p-2 rounded-xl bg-black/60 backdrop-blur-md text-red-400 opacity-0 group-hover:opacity-100 transition-all hover:bg-red-500/20 border border-white/10 z-10"
+                    title="Delete Album"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+              {albums.length === 0 && (
+                <div className="col-span-full flex flex-col items-center justify-center py-32 text-center">
+                  <div className="w-20 h-20 rounded-[2.5rem] bg-zinc-900 flex items-center justify-center mb-6 text-zinc-700">
+                    <Search size={32} />
+                  </div>
+                  <h3 className="text-xl font-semibold text-zinc-300">No albums yet</h3>
+                  <p className="text-zinc-500 max-w-xs mt-2">Create your first album to organize your media.</p>
+                  <button 
+                    onClick={() => setShowCreateAlbumModal(true)}
+                    className="mt-6 px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition-all"
+                  >
+                    Create Album
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className={`grid ${gridColsClass}`}>
+              <AnimatePresence mode="popLayout">
+                {filteredMedia.map((item) => (
+                  <motion.div
+                    key={item.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <MediaCard 
+                      item={item} 
+                      onClick={setSelectedMedia}
+                      onToggleFavorite={toggleFavorite}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {filteredMedia.length === 0 && activeTab !== 'albums' && (activeTab !== 'locked' || isVaultUnlocked) && (
+            <div className="flex flex-col items-center justify-center py-32 text-center">
+              <div className="w-20 h-20 rounded-[2.5rem] bg-zinc-900 flex items-center justify-center mb-6 text-zinc-700">
+                <Search size={32} />
+              </div>
+              <h3 className="text-xl font-semibold text-zinc-300">No media found</h3>
+              <p className="text-zinc-500 max-w-xs mt-2">
+                {media.length === 0 
+                  ? 'Upload some photos or videos to get started!'
+                  : 'Try adjusting your filters or search terms to find what you\'re looking for.'}
+              </p>
+              {media.length === 0 && (
+                <button 
+                  onClick={() => setShowUploadModal(true)}
+                  className="mt-6 px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition-all"
+                >
+                  Upload Media
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Media Viewer */}
+      <AnimatePresence>
+        {selectedMedia && (
+          <MediaViewer 
+            item={selectedMedia} 
+            allItems={filteredMedia}
+            onClose={() => setSelectedMedia(null)} 
+            onToggleFavorite={toggleFavorite}
+            onToggleLock={toggleLock}
+            onDelete={deleteMedia}
+            onNavigate={setSelectedMedia}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Upload Modal */}
+      <UploadModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onUpload={handleUpload}
+      />
+
+      {/* Create Album Modal */}
+      <CreateAlbumModal
+        isOpen={showCreateAlbumModal}
+        onClose={() => setShowCreateAlbumModal(false)}
+        onCreate={handleCreateAlbum}
+        allMedia={media}
+      />
+    </div>
+  );
+};
+
+export default App;
