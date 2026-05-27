@@ -9,7 +9,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { requireAuth } from '@clerk/express';
+import { clerkMiddleware, requireAuth } from '@clerk/express';
 
 const REQUIRED_ENV = [
   'B2_REGION',
@@ -175,6 +175,7 @@ export function createB2App() {
 
   app.use(cors({ origin: true }));
   app.use(express.json({ limit: '64kb' }));
+  app.use(clerkMiddleware());
 
   app.get('/api/health', (_req, res) => {
     res.json({
@@ -367,6 +368,11 @@ export function createB2App() {
         res.status(502).json({ error: 'Backblaze B2 delete failed.' });
       }
     });
+  });
+
+  app.use((err, req, res, next) => {
+    console.error('Express Error:', err);
+    res.status(500).json({ error: err.message || 'Internal Server Error' });
   });
 
   return app;
