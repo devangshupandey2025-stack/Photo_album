@@ -22,7 +22,11 @@ function toStoredMediaItem(item: MediaItem): MediaItem {
 
 function parseError(payload: unknown, fallback: string): string {
   if (payload && typeof payload === 'object' && 'error' in payload && typeof (payload as { error?: unknown }).error === 'string') {
-    return (payload as { error: string }).error;
+    const obj = payload as any;
+    let msg = obj.error;
+    if (obj.details) msg += ` (Details: ${obj.details})`;
+    if (obj.code) msg += ` (Code: ${obj.code})`;
+    return msg;
   }
   return fallback;
 }

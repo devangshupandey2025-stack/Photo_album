@@ -259,7 +259,7 @@ export function createB2App() {
     })().catch((error) => {
       logB2Error('B2 media index read failed:', error);
       if (!res.headersSent) {
-        res.status(502).json({ error: 'Could not read stored media metadata.' });
+        res.status(502).json({ error: 'Could not read stored media metadata.', details: error.message, code: error.name });
       }
     });
   });
