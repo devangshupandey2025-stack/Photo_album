@@ -48,8 +48,11 @@ Photo_album/
 │       ├── cn.ts           ← Tailwind class merger (clsx + twMerge)
 │       ├── b2Api.ts        ← Browser API client for the local B2 server
 │       └── fileHelpers.ts  ← File utilities (download, share, etc.)
-└── server/
-    └── server.mjs          ← Backblaze B2 upload/read/delete API
+├── server/
+│   ├── b2App.mjs           ← Shared Backblaze B2 Express app
+│   └── server.mjs          ← Local Backblaze B2 upload/read/delete API
+└── api/
+    └── [...path].mjs       ← Vercel API route for the same B2 backend
 ```
 
 ### Data Flow
@@ -57,7 +60,7 @@ Photo_album/
 ```
 User uploads file
     → UploadModal sends file to /api/upload
-    → server/server.mjs uploads the file to Backblaze B2
+    → server/b2App.mjs uploads the file to Backblaze B2
     → Creates MediaItem object with metadata
     → Saves to localStorage via useLocalStorage hook
     → App.tsx re-renders gallery with new item
@@ -106,6 +109,19 @@ npm start
 ```
 
 The production server serves `dist/index.html` and the `/api` routes from the same origin.
+
+### Deploy on Vercel
+
+Set these environment variables in your Vercel project:
+
+- `B2_REGION`
+- `B2_BUCKET`
+- `B2_KEY_ID`
+- `B2_APPLICATION_KEY`
+- `B2_KEY_PREFIX` (optional)
+- `B2_ENDPOINT` (optional, only if you use a custom S3 endpoint)
+
+The `api/[...path].mjs` function handles the same `/api/upload`, `/api/files/:key`, and `/api/health` routes on Vercel, so the frontend can keep using the same `/api/*` URLs.
 
 ---
 
