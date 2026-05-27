@@ -43,22 +43,27 @@ export async function fetchStoredMediaItems(): Promise<MediaItem[]> {
 }
 
 export async function requestB2UploadSession(file: File, mediaType: MediaType): Promise<B2UploadSession> {
-  const response = await fetch('/api/uploads/sign', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      filename: file.name,
-      contentType: file.type || 'application/octet-stream',
-      size: file.size,
-      mediaType,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch('/api/uploads/sign', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        filename: file.name,
+        contentType: file.type || 'application/octet-stream',
+        size: file.size,
+        mediaType,
+      }),
+    });
+  } catch (networkError) {
+    throw new Error('Cannot reach the upload server. Make sure the backend is running (npm run server).');
+  }
 
   const payload = await readJson(response) as Partial<B2UploadSession> & { error?: string };
   if (!response.ok) {
-    throw new Error(parseError(payload, 'Could not create upload session.'));
+    throw new Error(parseError(payload, `Upload signing failed (${response.status}).`));
   }
 
   return payload as B2UploadSession;

@@ -22,7 +22,7 @@ function getB2Config() {
   const missingEnv = REQUIRED_ENV.filter((name) => !process.env[name]);
   const region = process.env.B2_REGION || '';
   const bucket = process.env.B2_BUCKET || '';
-  const endpointOverride = process.env.B2_ENDPOINT?.replace(/^B2_ENDPOINT=/, '').trim();
+  const endpointOverride = process.env.B2_ENDPOINT?.trim();
   const endpoint = endpointOverride || (region ? `https://s3.${region}.backblazeb2.com` : '');
   const keyPrefix = (process.env.B2_KEY_PREFIX || 'lumina').replace(/^\/+|\/+$/g, '');
 

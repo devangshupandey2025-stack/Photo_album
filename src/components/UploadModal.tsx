@@ -176,15 +176,15 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
       }
     }
 
+    const remaining = pendingFiles.filter((file) => failedIds.has(file.id));
     if (uploadedItems.length > 0) {
       onUpload(uploadedItems);
     }
 
-    const remaining = pendingFiles.filter((file) => failedIds.has(file.id));
     setPendingFiles(remaining);
     setIsUploading(false);
 
-    if (remaining.length === 0) {
+    if (failedIds.size === 0) {
       onClose();
     }
   };
