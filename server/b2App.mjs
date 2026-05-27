@@ -4,6 +4,7 @@ import cors from 'cors';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  PutBucketCorsCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -128,6 +129,29 @@ function validateManifestItem(item, expectedId) {
   return null;
 }
 
+async function ensureBucketCors(s3, config) {
+  if (!config.bucket || config.missingEnv.length > 0) return;
+  try {
+    await s3.send(new PutBucketCorsCommand({
+      Bucket: config.bucket,
+      CORSConfiguration: {
+        CORSRules: [
+          {
+            AllowedHeaders: ['*'],
+            AllowedMethods: ['GET', 'PUT', 'HEAD', 'DELETE'],
+            AllowedOrigins: ['*'],
+            ExposeHeaders: ['ETag', 'x-amz-request-id'],
+            MaxAgeSeconds: 3600,
+          },
+        ],
+      },
+    }));
+    console.log('B2 bucket CORS rules configured.');
+  } catch (error) {
+    console.warn('Could not set B2 bucket CORS (may need s3:PutBucketCors permission):', error?.message || error);
+  }
+}
+
 export function createB2App() {
   const config = getB2Config();
   if (config.missingEnv.length > 0) {
@@ -140,7 +164,12 @@ export function createB2App() {
     region: config.region,
     credentials: config.credentials,
     forcePathStyle: true,
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
+
+  // Configure CORS on the B2 bucket (fire-and-forget on startup)
+  ensureBucketCors(s3, config).catch(() => {});
 
   app.use(cors({ origin: true }));
   app.use(express.json({ limit: '64kb' }));
