@@ -15,6 +15,11 @@ interface MediaIndexResponse {
   items?: MediaItem[];
 }
 
+function toStoredMediaItem(item: MediaItem): MediaItem {
+  const { thumbnail: _thumbnail, ...storedItem } = item;
+  return storedItem;
+}
+
 function parseError(payload: unknown, fallback: string): string {
   if (payload && typeof payload === 'object' && 'error' in payload && typeof (payload as { error?: unknown }).error === 'string') {
     return (payload as { error: string }).error;
@@ -94,7 +99,7 @@ export async function upsertStoredMediaItem(item: MediaItem): Promise<void> {
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ item }),
+    body: JSON.stringify({ item: toStoredMediaItem(item) }),
   });
 
   const payload = await readJson(response) as { error?: string };
