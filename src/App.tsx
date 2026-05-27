@@ -10,6 +10,13 @@ import CreateAlbumModal from './components/CreateAlbumModal';
 import { useLocalStorage } from './hooks/useLocalStorage';
 
 import { MediaItem, Album, SortOption, GridSize } from './types';
+import {
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  SignUpButton,
+  UserButton,
+} from '@clerk/react';
 import { formatFileSize } from './utils/fileHelpers';
 import {
   deleteB2File,
@@ -396,6 +403,22 @@ const App: React.FC = () => {
                 )}
               </AnimatePresence>
             </div>
+
+            {/* Auth Controls */}
+            <div className="flex items-center gap-2 ml-2 pl-4 border-l border-white/10">
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button className="text-sm font-medium text-zinc-300 hover:text-white transition-colors">Sign in</button>
+                </SignInButton>
+                <SignUpButton mode="modal">
+                  <button className="text-sm font-medium px-3 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white transition-colors shadow-lg shadow-indigo-500/20">Sign up</button>
+                </SignUpButton>
+              </SignedOut>
+              <SignedIn>
+                <UserButton appearance={{ elements: { userButtonAvatarBox: "w-8 h-8" } }} />
+              </SignedIn>
+            </div>
+
           </div>
         </header>
 
