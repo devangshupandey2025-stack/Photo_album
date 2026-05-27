@@ -15,6 +15,7 @@ import {
   SignInButton,
   SignUpButton,
   UserButton,
+  useAuth,
 } from '@clerk/react';
 import { formatFileSize } from './utils/fileHelpers';
 import {
@@ -65,8 +66,10 @@ const App: React.FC = () => {
     if (tab !== 'locked') setIsVaultUnlocked(false);
   };
 
-  const [media, setMedia] = useLocalStorage<MediaItem[]>('lumina-media', []);
-  const [albums, setAlbums] = useLocalStorage<Album[]>('lumina-albums', []);
+  const { getToken, userId } = useAuth();
+
+  const [media, setMedia] = useLocalStorage<MediaItem[]>(`lumina-media-${userId || 'guest'}`, []);
+  const [albums, setAlbums] = useLocalStorage<Album[]>(`lumina-albums-${userId || 'guest'}`, []);
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
   const [isVaultUnlocked, setIsVaultUnlocked] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -81,19 +84,28 @@ const App: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
 
-    fetchStoredMediaItems()
-      .then((remoteItems) => {
-        if (cancelled || remoteItems.length === 0) return;
-        setMedia((current) => mergeMediaItems(current, remoteItems));
-      })
-      .catch((error) => {
-        console.error('Could not load stored media metadata:', error);
-      });
+    if (!userId) {
+      setMedia([]);
+      setAlbums([]);
+      return;
+    }
+
+    getToken().then((token) => {
+      if (!token || cancelled) return;
+      fetchStoredMediaItems(token)
+        .then((remoteItems) => {
+          if (cancelled || remoteItems.length === 0) return;
+          setMedia((current) => mergeMediaItems(current, remoteItems));
+        })
+        .catch((error) => {
+          console.error('Could not load stored media metadata:', error);
+        });
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [setMedia]);
+  }, [userId, getToken, setMedia, setAlbums]);
 
   const filteredMedia = useMemo(() => {
     if (activeTab === 'albums' && activeAlbumId) {
@@ -144,34 +156,30 @@ const App: React.FC = () => {
     if (!item) return;
 
     const nextItem = { ...item, isFavorite: !item.isFavorite };
-    setMedia((prev) => prev.map((entry) => (entry.id === id ? nextItem : entry)));
+    setMedia(media.map((m) => (m.id === id ? nextItem : m)));
 
-    if (item.storageProvider === 'b2' && item.b2Key) {
-      try {
-        await upsertStoredMediaItem(nextItem);
-      } catch (error) {
-        console.error('Could not save favorite state to Backblaze B2:', error);
-        setMedia((prev) => prev.map((entry) => (entry.id === id ? item : entry)));
-      }
-    }
-  }, [media, setMedia]);
+    getToken().then((token) => {
+      if (!token) return;
+      upsertStoredMediaItem(nextItem, token).catch((error) => {
+        console.error('Could not sync favorite state:', error);
+      });
+    });
+  }, [media, setMedia, getToken]);
 
   const toggleLock = useCallback(async (id: string) => {
     const item = media.find((entry) => entry.id === id);
     if (!item) return;
 
     const nextItem = { ...item, isLocked: !item.isLocked };
-    setMedia((prev) => prev.map((entry) => (entry.id === id ? nextItem : entry)));
+    setMedia(media.map((m) => (m.id === id ? nextItem : m)));
 
-    if (item.storageProvider === 'b2' && item.b2Key) {
-      try {
-        await upsertStoredMediaItem(nextItem);
-      } catch (error) {
-        console.error('Could not save lock state to Backblaze B2:', error);
-        setMedia((prev) => prev.map((entry) => (entry.id === id ? item : entry)));
-      }
-    }
-  }, [media, setMedia]);
+    getToken().then((token) => {
+      if (!token) return;
+      upsertStoredMediaItem(nextItem, token).catch((error) => {
+        console.error('Could not sync locked state:', error);
+      });
+    });
+  }, [media, setMedia, getToken]);
 
   const deleteMedia = useCallback(async (id: string) => {
     const item = media.find((entry) => entry.id === id);
@@ -179,10 +187,13 @@ const App: React.FC = () => {
 
     if (item.storageProvider === 'b2' && item.b2Key) {
       try {
-        await Promise.all([
-          deleteB2File(item.b2Key),
-          deleteStoredMediaItem(item.id),
-        ]);
+        const token = await getToken();
+        if (token) {
+          await Promise.all([
+            deleteB2File(item.b2Key || ''),
+            deleteStoredMediaItem(item.id, token),
+          ]);
+        }
       } catch (error) {
         console.error('Could not delete file from Backblaze B2:', error);
         return;
@@ -271,6 +282,18 @@ const App: React.FC = () => {
       />
       
       <main className="flex-1 md:ml-64 px-4 sm:px-8 pt-8 pb-32 md:pb-8 min-h-screen relative">
+        <Show when="signed-out">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md z-30">
+            <h2 className="text-3xl font-bold mb-4 text-white">Welcome to Lumina</h2>
+            <p className="text-zinc-400 mb-8 max-w-md text-center">Sign in to view and manage your personal photo and video collection securely.</p>
+            <SignInButton mode="modal">
+              <button className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition-all shadow-lg shadow-indigo-600/20">
+                Get Started
+              </button>
+            </SignInButton>
+          </div>
+        </Show>
+
         {/* Header */}
         <header className="sticky top-0 z-40 -mx-4 sm:-mx-8 px-4 sm:px-8 py-4 mb-8 glass-panel border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">

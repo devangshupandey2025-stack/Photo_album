@@ -1,6 +1,7 @@
 import React, { useCallback, useState, useRef } from 'react';
 import { X, UploadCloud, FileImage, Film, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@clerk/react';
 import { MediaItem } from '../types';
 import {
   deleteB2File,
@@ -31,6 +32,7 @@ interface PendingFile {
 const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 
 const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) => {
+  const { getToken } = useAuth();
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -107,6 +109,12 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
     const uploadedItems: MediaItem[] = [];
     const failedIds = new Set<string>();
 
+    const token = await getToken();
+    if (!token) {
+      setIsUploading(false);
+      return;
+    }
+
     for (const pf of pendingFiles) {
       if (pf.file.size > MAX_UPLOAD_BYTES) {
         failedIds.add(pf.id);
@@ -123,7 +131,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
 
       try {
         updatePendingFile(pf.id, (file) => ({ ...file, status: 'signing', progress: 5, error: undefined }));
-        session = await requestB2UploadSession(pf.file, pf.type);
+        session = await requestB2UploadSession(pf.file, pf.type, token);
 
         updatePendingFile(pf.id, (file) => ({ ...file, status: 'uploading', progress: 10 }));
         await uploadToB2(session.uploadUrl, pf.file, (progress) => {
@@ -157,7 +165,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
         };
 
         updatePendingFile(pf.id, (file) => ({ ...file, status: 'saving', progress: 100 }));
-        await upsertStoredMediaItem(item);
+        await upsertStoredMediaItem(item, token);
 
         uploadedItems.push(item);
         updatePendingFile(pf.id, (file) => ({ ...file, status: 'done', progress: 100 }));

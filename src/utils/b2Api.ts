@@ -31,8 +31,12 @@ async function readJson(response: Response): Promise<any> {
   return response.json().catch(() => ({}));
 }
 
-export async function fetchStoredMediaItems(): Promise<MediaItem[]> {
-  const response = await fetch('/api/media');
+export async function fetchStoredMediaItems(token: string): Promise<MediaItem[]> {
+  const response = await fetch('/api/media', {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
   const payload = await readJson(response) as MediaIndexResponse & { error?: string };
 
   if (!response.ok) {
@@ -42,13 +46,14 @@ export async function fetchStoredMediaItems(): Promise<MediaItem[]> {
   return payload.items || [];
 }
 
-export async function requestB2UploadSession(file: File, mediaType: MediaType): Promise<B2UploadSession> {
+export async function requestB2UploadSession(file: File, mediaType: MediaType, token: string): Promise<B2UploadSession> {
   let response: Response;
   try {
     response = await fetch('/api/uploads/sign', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
       },
       body: JSON.stringify({
         filename: file.name,
@@ -98,11 +103,12 @@ export function uploadToB2(uploadUrl: string, file: File, onProgress?: (progress
   });
 }
 
-export async function upsertStoredMediaItem(item: MediaItem): Promise<void> {
+export async function upsertStoredMediaItem(item: MediaItem, token: string): Promise<void> {
   const response = await fetch(`/api/media/${encodeURIComponent(item.id)}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
     },
     body: JSON.stringify({ item: toStoredMediaItem(item) }),
   });
@@ -113,9 +119,12 @@ export async function upsertStoredMediaItem(item: MediaItem): Promise<void> {
   }
 }
 
-export async function deleteStoredMediaItem(id: string): Promise<void> {
+export async function deleteStoredMediaItem(id: string, token: string): Promise<void> {
   const response = await fetch(`/api/media/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
   });
 
   const payload = await readJson(response) as { error?: string };

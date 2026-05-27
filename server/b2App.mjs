@@ -9,6 +9,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { requireAuth } from '@clerk/express';
 
 const REQUIRED_ENV = [
   'B2_REGION',
@@ -33,7 +34,6 @@ function getB2Config() {
     bucket,
     endpoint,
     keyPrefix,
-    manifestKey: `${keyPrefix}/metadata/media-index.json`,
     credentials: {
       accessKeyId: process.env.B2_KEY_ID || '',
       secretAccessKey: process.env.B2_APPLICATION_KEY || '',
@@ -80,11 +80,12 @@ async function streamToString(body) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-async function readMediaIndex(s3, config) {
+async function readMediaIndex(s3, config, userId) {
   try {
+    const manifestKey = `${config.keyPrefix}/metadata/${userId}-media-index.json`;
     const result = await s3.send(new GetObjectCommand({
       Bucket: config.bucket,
-      Key: config.manifestKey,
+      Key: manifestKey,
     }));
 
     const raw = await streamToString(result.Body);
@@ -103,15 +104,16 @@ async function readMediaIndex(s3, config) {
   }
 }
 
-async function writeMediaIndex(s3, config, items) {
+async function writeMediaIndex(s3, config, userId, items) {
   const payload = {
     updatedAt: new Date().toISOString(),
     items,
   };
 
+  const manifestKey = `${config.keyPrefix}/metadata/${userId}-media-index.json`;
   await s3.send(new PutObjectCommand({
     Bucket: config.bucket,
-    Key: config.manifestKey,
+    Key: manifestKey,
     Body: JSON.stringify(payload, null, 2),
     ContentType: 'application/json',
     CacheControl: 'no-store',
@@ -183,7 +185,7 @@ export function createB2App() {
     });
   });
 
-  app.post('/api/uploads/sign', (req, res) => {
+  app.post('/api/uploads/sign', requireAuth(), (req, res) => {
     void (async () => {
       if (!config.bucket || config.missingEnv.length > 0) {
         res.status(500).json({ error: `Server is missing B2 config: ${config.missingEnv.join(', ')}` });
@@ -214,7 +216,8 @@ export function createB2App() {
 
       const id = crypto.randomUUID();
       const day = new Date().toISOString().slice(0, 10);
-      const key = `${config.keyPrefix}/${mediaFolder(mediaType)}/${day}/${id}-${safeFilename(filename)}`;
+      const userId = req.auth.userId;
+      const key = `${config.keyPrefix}/${userId}/${mediaFolder(mediaType)}/${day}/${id}-${safeFilename(filename)}`;
 
       const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({
         Bucket: config.bucket,
@@ -242,14 +245,15 @@ export function createB2App() {
     });
   });
 
-  app.get('/api/media', (_req, res) => {
+  app.get('/api/media', requireAuth(), (_req, res) => {
     void (async () => {
       if (!config.bucket || config.missingEnv.length > 0) {
         res.status(500).json({ error: `Server is missing B2 config: ${config.missingEnv.join(', ')}` });
         return;
       }
 
-      const index = await readMediaIndex(s3, config);
+      const userId = _req.auth.userId;
+      const index = await readMediaIndex(s3, config, userId);
       res.json(index);
     })().catch((error) => {
       logB2Error('B2 media index read failed:', error);
@@ -259,7 +263,7 @@ export function createB2App() {
     });
   });
 
-  app.put('/api/media/:id', (req, res) => {
+  app.put('/api/media/:id', requireAuth(), (req, res) => {
     void (async () => {
       if (!config.bucket || config.missingEnv.length > 0) {
         res.status(500).json({ error: `Server is missing B2 config: ${config.missingEnv.join(', ')}` });
@@ -273,10 +277,11 @@ export function createB2App() {
         return;
       }
 
-      const index = await readMediaIndex(s3, config);
+      const userId = req.auth.userId;
+      const index = await readMediaIndex(s3, config, userId);
       const nextItems = index.items.filter((existing) => existing.id !== item.id);
       nextItems.unshift(item);
-      const payload = await writeMediaIndex(s3, config, nextItems);
+      const payload = await writeMediaIndex(s3, config, userId, nextItems);
       res.json({ ok: true, item, updatedAt: payload.updatedAt });
     })().catch((error) => {
       logB2Error('B2 media index write failed:', error);
@@ -286,21 +291,34 @@ export function createB2App() {
     });
   });
 
-  app.delete('/api/media/:id', (_req, res) => {
+  app.delete('/api/media/:id', requireAuth(), (req, res) => {
     void (async () => {
       if (!config.bucket || config.missingEnv.length > 0) {
         res.status(500).json({ error: `Server is missing B2 config: ${config.missingEnv.join(', ')}` });
         return;
       }
 
-      const index = await readMediaIndex(s3, config);
-      const nextItems = index.items.filter((existing) => existing.id !== _req.params.id);
+      const userId = req.auth.userId;
+      const index = await readMediaIndex(s3, config, userId);
+      const nextItems = index.items.filter((existing) => existing.id !== req.params.id);
       if (nextItems.length === index.items.length) {
         res.status(404).json({ error: 'Media metadata not found.' });
         return;
       }
 
-      const payload = await writeMediaIndex(s3, config, nextItems);
+      const deletedItem = index.items.find((item) => item.id === req.params.id);
+      if (deletedItem) {
+        try {
+          await s3.send(new DeleteObjectCommand({
+            Bucket: config.bucket,
+            Key: deletedItem.b2Key,
+          }));
+        } catch (error) {
+          logB2Error('B2 object delete failed:', error);
+        }
+      }
+
+      const payload = await writeMediaIndex(s3, config, userId, nextItems);
       res.json({ ok: true, updatedAt: payload.updatedAt });
     })().catch((error) => {
       logB2Error('B2 media index delete failed:', error);
