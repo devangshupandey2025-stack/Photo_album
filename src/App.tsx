@@ -8,7 +8,7 @@ import AlbumCard from './components/AlbumCard';
 import UploadModal from './components/UploadModal';
 import CreateAlbumModal from './components/CreateAlbumModal';
 import { useLocalStorage } from './hooks/useLocalStorage';
-import { mockMedia, mockAlbums } from './mockData';
+
 import { MediaItem, Album, SortOption, GridSize } from './types';
 import { formatFileSize } from './utils/fileHelpers';
 import {
@@ -59,8 +59,8 @@ const App: React.FC = () => {
     if (tab !== 'locked') setIsVaultUnlocked(false);
   };
 
-  const [media, setMedia] = useLocalStorage<MediaItem[]>('lumina-media', mockMedia);
-  const [albums, setAlbums] = useLocalStorage<Album[]>('lumina-albums', mockAlbums);
+  const [media, setMedia] = useLocalStorage<MediaItem[]>('lumina-media', []);
+  const [albums, setAlbums] = useLocalStorage<Album[]>('lumina-albums', []);
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
   const [isVaultUnlocked, setIsVaultUnlocked] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
