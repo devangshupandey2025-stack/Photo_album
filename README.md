@@ -46,11 +46,11 @@ Photo_album/
 │   │   └── useLocalStorage.ts  ← Persistent state in localStorage
 │   └── utils/
 │       ├── cn.ts           ← Tailwind class merger (clsx + twMerge)
-│       ├── b2Api.ts        ← Browser API client for the local B2 server
+│       ├── b2Api.ts        ← Browser API client for direct B2 uploads + metadata sync
 │       └── fileHelpers.ts  ← File utilities (download, share, etc.)
 ├── server/
 │   ├── b2App.mjs           ← Shared Backblaze B2 Express app
-│   └── server.mjs          ← Local Backblaze B2 upload/read/delete API
+│   └── server.mjs          ← Local Backblaze B2 sign/read/delete API
 └── api/
     └── [...path].mjs       ← Vercel API route for the same B2 backend
 ```
@@ -59,10 +59,10 @@ Photo_album/
 
 ```
 User uploads file
-    → UploadModal sends file to /api/upload
-    → server/b2App.mjs uploads the file to Backblaze B2
-    → Creates MediaItem object with metadata
-    → Saves to localStorage via useLocalStorage hook
+    → UploadModal requests a signed B2 upload URL from /api/uploads/sign
+    → Browser uploads the file directly to Backblaze B2
+    → UploadModal saves the MediaItem to the B2 metadata index
+    → App merges server metadata with local cache
     → App.tsx re-renders gallery with new item
 
 User clicks photo
@@ -121,7 +121,7 @@ Set these environment variables in your Vercel project:
 - `B2_KEY_PREFIX` (optional)
 - `B2_ENDPOINT` (optional, only if you use a custom S3 endpoint)
 
-The `api/[...path].mjs` function handles the same `/api/upload`, `/api/files/:key`, and `/api/health` routes on Vercel, so the frontend can keep using the same `/api/*` URLs.
+The `api/[...path].mjs` function handles `/api/uploads/sign`, `/api/media`, `/api/files/:key`, and `/api/health` on Vercel, so the frontend can keep using the same `/api/*` URLs.
 
 ---
 
@@ -165,7 +165,8 @@ The "Secure Vault" tab locks selected media behind a PIN screen.
 ## 💾 Storage Notes
 
 - Uploaded media is stored in Backblaze B2
-- `localStorage` stores only metadata and thumbnails for video previews
+- Upload metadata is stored in a Backblaze B2 JSON manifest under `B2_KEY_PREFIX/metadata/`
+- `localStorage` caches metadata for faster reloads and offline access
 - B2 credentials stay in `.env` on the Node server and are never exposed to the browser
 - Click **"Clear"** in the sidebar to wipe all data and start fresh
 - The app ships with demo Unsplash images — these are URLs (not stored locally)

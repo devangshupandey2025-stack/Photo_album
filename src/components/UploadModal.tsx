@@ -1,10 +1,15 @@
-
 import React, { useCallback, useState, useRef } from 'react';
 import { X, UploadCloud, FileImage, Film, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MediaItem } from '../types';
+import {
+  deleteB2File,
+  deleteStoredMediaItem,
+  requestB2UploadSession,
+  uploadToB2,
+  upsertStoredMediaItem,
+} from '../utils/b2Api';
 import { getMediaType, fileToDataUrl, generateVideoThumbnail, generateId, formatFileSize } from '../utils/fileHelpers';
-import { uploadFilesToB2 } from '../utils/b2Api';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -17,10 +22,13 @@ interface PendingFile {
   file: File;
   preview: string;
   type: 'image' | 'video';
-  status: 'pending' | 'processing' | 'done' | 'error';
+  status: 'pending' | 'signing' | 'uploading' | 'saving' | 'done' | 'error';
   title: string;
+  progress: number;
   error?: string;
 }
+
+const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 
 const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) => {
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
@@ -37,8 +45,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
       if (!mediaType) continue;
 
       const id = generateId();
-      const preview = mediaType === 'image' 
-        ? await fileToDataUrl(file) 
+      const preview = mediaType === 'image'
+        ? await fileToDataUrl(file)
         : '';
 
       newPending.push({
@@ -48,6 +56,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
         type: mediaType,
         status: 'pending',
         title: file.name.replace(/\.[^/.]+$/, ''),
+        progress: 0,
       });
     }
 
@@ -87,33 +96,56 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
     setPendingFiles(prev => prev.map(f => f.id === id ? { ...f, title } : f));
   };
 
+  const updatePendingFile = (id: string, updater: (file: PendingFile) => PendingFile) => {
+    setPendingFiles(prev => prev.map((file) => (file.id === id ? updater(file) : file)));
+  };
+
   const handleUpload = async () => {
     if (pendingFiles.length === 0) return;
     setIsUploading(true);
 
-    const mediaItems: MediaItem[] = [];
+    const uploadedItems: MediaItem[] = [];
+    const failedIds = new Set<string>();
 
-    setPendingFiles(prev => prev.map(f => ({ ...f, status: 'processing', error: undefined })));
+    for (const pf of pendingFiles) {
+      if (pf.file.size > MAX_UPLOAD_BYTES) {
+        failedIds.add(pf.id);
+        updatePendingFile(pf.id, (file) => ({
+          ...file,
+          status: 'error',
+          progress: 0,
+          error: 'Files must be 200MB or smaller.',
+        }));
+        continue;
+      }
 
-    try {
-      const uploadedFiles = await uploadFilesToB2(pendingFiles.map(pf => pf.file));
+      let session: Awaited<ReturnType<typeof requestB2UploadSession>> | null = null;
 
-      for (let i = 0; i < pendingFiles.length; i += 1) {
-        const pf = pendingFiles[i];
-        const uploaded = uploadedFiles[i];
-        let thumbnail: string | undefined;
+      try {
+        updatePendingFile(pf.id, (file) => ({ ...file, status: 'signing', progress: 5, error: undefined }));
+        session = await requestB2UploadSession(pf.file, pf.type);
 
+        updatePendingFile(pf.id, (file) => ({ ...file, status: 'uploading', progress: 10 }));
+        await uploadToB2(session.uploadUrl, pf.file, (progress) => {
+          updatePendingFile(pf.id, (file) => ({
+            ...file,
+            status: 'uploading',
+            progress,
+          }));
+        });
+
+        let thumbnail: string | undefined = pf.preview || undefined;
         if (pf.type === 'video') {
           const localUrl = URL.createObjectURL(pf.file);
           thumbnail = await generateVideoThumbnail(localUrl);
           URL.revokeObjectURL(localUrl);
         }
 
-        mediaItems.push({
-          id: pf.id,
-          url: uploaded.url,
+        const item: MediaItem = {
+          id: session.id,
+          url: session.url,
           thumbnail,
-          b2Key: uploaded.key,
+          b2Key: session.key,
           storageProvider: 'b2',
           type: pf.type,
           title: pf.title || pf.file.name,
@@ -122,25 +154,38 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
           isFavorite: false,
           isLocked: false,
           size: pf.file.size,
-        });
+        };
 
-        setPendingFiles(prev => prev.map(f => f.id === pf.id ? { ...f, status: 'done' } : f));
+        updatePendingFile(pf.id, (file) => ({ ...file, status: 'saving', progress: 100 }));
+        await upsertStoredMediaItem(item);
+
+        uploadedItems.push(item);
+        updatePendingFile(pf.id, (file) => ({ ...file, status: 'done', progress: 100 }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Upload failed.';
+        failedIds.add(pf.id);
+        updatePendingFile(pf.id, (file) => ({ ...file, status: 'error', error: message }));
+
+        if (session) {
+          try {
+            await deleteB2File(session.key);
+          } catch (cleanupError) {
+            console.error('Could not clean up failed B2 upload:', cleanupError);
+          }
+        }
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Upload failed.';
-      setPendingFiles(prev => prev.map(f => ({ ...f, status: 'error', error: message })));
     }
 
-    if (mediaItems.length > 0) {
-      onUpload(mediaItems);
+    if (uploadedItems.length > 0) {
+      onUpload(uploadedItems);
+    }
 
-      setTimeout(() => {
-        setPendingFiles([]);
-        setIsUploading(false);
-        onClose();
-      }, 800);
-    } else {
-      setIsUploading(false);
+    const remaining = pendingFiles.filter((file) => failedIds.has(file.id));
+    setPendingFiles(remaining);
+    setIsUploading(false);
+
+    if (remaining.length === 0) {
+      onClose();
     }
   };
 
@@ -161,13 +206,12 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
           exit={{ opacity: 0, scale: 0.9, y: 20 }}
           className="w-full max-w-2xl bg-zinc-900 border border-white/10 rounded-[2rem] shadow-2xl overflow-hidden"
         >
-          {/* Header */}
           <div className="flex items-center justify-between px-8 pt-8 pb-4">
             <div>
               <h2 className="text-2xl font-bold text-white">Upload Media</h2>
-              <p className="text-zinc-500 text-sm mt-1">Add photos & videos to your library</p>
+              <p className="text-zinc-500 text-sm mt-1">Direct upload to Backblaze B2</p>
             </div>
-            <button 
+            <button
               onClick={onClose}
               className="p-2 rounded-full hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
             >
@@ -175,7 +219,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
             </button>
           </div>
 
-          {/* Drop Zone */}
           <div className="px-8 pb-4">
             <div
               onDragOver={handleDragOver}
@@ -184,8 +227,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
               onClick={() => fileInputRef.current?.click()}
               className={`
                 relative border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all duration-300
-                ${isDragging 
-                  ? 'border-indigo-500 bg-indigo-500/10 scale-[1.02]' 
+                ${isDragging
+                  ? 'border-indigo-500 bg-indigo-500/10 scale-[1.02]'
                   : 'border-white/10 hover:border-white/20 hover:bg-white/5'}
               `}
             >
@@ -196,7 +239,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
                 {isDragging ? 'Drop files here!' : 'Drop files or click to browse'}
               </p>
               <p className="text-zinc-500 text-sm">
-                Supports JPG, PNG, GIF, WebP, MP4, WebM, MOV
+                Supports JPG, PNG, GIF, WebP, MP4, WebM, MOV up to 200MB
               </p>
               <input
                 ref={fileInputRef}
@@ -209,21 +252,19 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
             </div>
           </div>
 
-          {/* Pending Files */}
           {pendingFiles.length > 0 && (
-            <div className="px-8 pb-4 max-h-64 overflow-y-auto">
+            <div className="px-8 pb-4 max-h-72 overflow-y-auto">
               <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-3">
                 {pendingFiles.length} file{pendingFiles.length > 1 ? 's' : ''} selected
               </p>
               <div className="space-y-2">
                 {pendingFiles.map((pf) => (
-                  <motion.div 
+                  <motion.div
                     key={pf.id}
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     className="flex items-center gap-3 p-3 bg-zinc-800/50 rounded-xl border border-white/5"
                   >
-                    {/* Preview */}
                     <div className="w-12 h-12 rounded-lg overflow-hidden bg-zinc-700 flex-shrink-0 flex items-center justify-center">
                       {pf.preview ? (
                         <img src={pf.preview} alt="" className="w-full h-full object-cover" />
@@ -232,7 +273,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
                       )}
                     </div>
 
-                    {/* Info */}
                     <div className="flex-1 min-w-0">
                       <input
                         type="text"
@@ -246,23 +286,30 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
                         <span>{pf.type.toUpperCase()}</span>
                         <span>•</span>
                         <span>{formatFileSize(pf.file.size)}</span>
+                        <span>•</span>
+                        <span>{pf.status === 'uploading' ? `${pf.progress}%` : pf.status}</span>
+                      </div>
+                      <div className="mt-2 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                        <div
+                          className={`h-full transition-all ${pf.status === 'error' ? 'bg-red-500' : 'bg-indigo-500'}`}
+                          style={{ width: `${pf.progress}%` }}
+                        />
                       </div>
                       {pf.error && (
                         <p className="text-xs text-red-400 mt-1 px-1">{pf.error}</p>
                       )}
                     </div>
 
-                    {/* Status */}
                     <div className="flex-shrink-0">
                       {pf.status === 'done' && <CheckCircle2 size={20} className="text-emerald-500" />}
                       {pf.status === 'error' && <AlertCircle size={20} className="text-red-500" />}
-                      {pf.status === 'processing' && (
+                      {pf.status === 'signing' || pf.status === 'uploading' || pf.status === 'saving' ? (
                         <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                      )}
-                      {pf.status === 'pending' && !isUploading && (
-                        <button 
+                      ) : (
+                        <button
                           onClick={() => removeFile(pf.id)}
                           className="p-1 rounded-full hover:bg-white/10 text-zinc-500 hover:text-red-400 transition-colors"
+                          disabled={isUploading}
                         >
                           <X size={16} />
                         </button>
@@ -274,10 +321,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
             </div>
           )}
 
-          {/* Footer */}
           <div className="px-8 py-6 border-t border-white/5 flex items-center justify-between">
             <p className="text-xs text-zinc-500">
-              Files are uploaded to Backblaze B2
+              Files are uploaded directly to Backblaze B2
             </p>
             <div className="flex gap-3">
               <button
@@ -294,7 +340,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
                 {isUploading ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Processing...
+                    Uploading...
                   </>
                 ) : (
                   <>

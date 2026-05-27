@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import MediaCard from './components/MediaCard';
 import MediaViewer from './components/MediaViewer';
@@ -11,7 +11,12 @@ import { useLocalStorage } from './hooks/useLocalStorage';
 import { mockMedia, mockAlbums } from './mockData';
 import { MediaItem, Album, SortOption, GridSize } from './types';
 import { formatFileSize } from './utils/fileHelpers';
-import { deleteB2File } from './utils/b2Api';
+import {
+  deleteB2File,
+  deleteStoredMediaItem,
+  fetchStoredMediaItems,
+  upsertStoredMediaItem,
+} from './utils/b2Api';
 import { Search, Grid3X3, Grid2X2, SortDesc, Filter, ArrowLeft, X, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -29,6 +34,20 @@ const FILTER_OPTIONS = [
   { value: 'image', label: 'Images Only' },
   { value: 'video', label: 'Videos Only' },
 ];
+
+const mergeMediaItems = (localItems: MediaItem[], remoteItems: MediaItem[]) => {
+  const merged = new Map<string, MediaItem>();
+
+  localItems.forEach((item) => {
+    merged.set(item.id, item);
+  });
+
+  remoteItems.forEach((item) => {
+    merged.set(item.id, { ...merged.get(item.id), ...item });
+  });
+
+  return Array.from(merged.values());
+};
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('photos');
@@ -52,6 +71,23 @@ const App: React.FC = () => {
   const [showCreateAlbumModal, setShowCreateAlbumModal] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchStoredMediaItems()
+      .then((remoteItems) => {
+        if (cancelled || remoteItems.length === 0) return;
+        setMedia((current) => mergeMediaItems(current, remoteItems));
+      })
+      .catch((error) => {
+        console.error('Could not load stored media metadata:', error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setMedia]);
 
   const filteredMedia = useMemo(() => {
     if (activeTab === 'albums' && activeAlbumId) {
@@ -97,31 +133,62 @@ const App: React.FC = () => {
     return items;
   }, [media, albums, activeTab, activeAlbumId, searchQuery, sortOption, filterType]);
 
-  const toggleFavorite = (id: string) => {
-    setMedia(prev => prev.map(m => m.id === id ? { ...m, isFavorite: !m.isFavorite } : m));
-  };
+  const toggleFavorite = useCallback(async (id: string) => {
+    const item = media.find((entry) => entry.id === id);
+    if (!item) return;
 
-  const toggleLock = (id: string) => {
-    setMedia(prev => prev.map(m => m.id === id ? { ...m, isLocked: !m.isLocked } : m));
-  };
+    const nextItem = { ...item, isFavorite: !item.isFavorite };
+    setMedia((prev) => prev.map((entry) => (entry.id === id ? nextItem : entry)));
 
-  const deleteMedia = async (id: string) => {
-    const item = media.find(m => m.id === id);
-    setMedia(prev => prev.filter(m => m.id !== id));
-    // Also remove from albums
-    setAlbums(prev => prev.map(a => ({
-      ...a,
-      mediaIds: a.mediaIds.filter(mid => mid !== id),
-    })));
-
-    if (item?.b2Key) {
+    if (item.storageProvider === 'b2' && item.b2Key) {
       try {
-        await deleteB2File(item.b2Key);
+        await upsertStoredMediaItem(nextItem);
       } catch (error) {
-        console.error('Could not delete file from Backblaze B2:', error);
+        console.error('Could not save favorite state to Backblaze B2:', error);
+        setMedia((prev) => prev.map((entry) => (entry.id === id ? item : entry)));
       }
     }
-  };
+  }, [media, setMedia]);
+
+  const toggleLock = useCallback(async (id: string) => {
+    const item = media.find((entry) => entry.id === id);
+    if (!item) return;
+
+    const nextItem = { ...item, isLocked: !item.isLocked };
+    setMedia((prev) => prev.map((entry) => (entry.id === id ? nextItem : entry)));
+
+    if (item.storageProvider === 'b2' && item.b2Key) {
+      try {
+        await upsertStoredMediaItem(nextItem);
+      } catch (error) {
+        console.error('Could not save lock state to Backblaze B2:', error);
+        setMedia((prev) => prev.map((entry) => (entry.id === id ? item : entry)));
+      }
+    }
+  }, [media, setMedia]);
+
+  const deleteMedia = useCallback(async (id: string) => {
+    const item = media.find((entry) => entry.id === id);
+    if (!item) return;
+
+    if (item.storageProvider === 'b2' && item.b2Key) {
+      try {
+        await Promise.all([
+          deleteB2File(item.b2Key),
+          deleteStoredMediaItem(item.id),
+        ]);
+      } catch (error) {
+        console.error('Could not delete file from Backblaze B2:', error);
+        return;
+      }
+    }
+
+    setMedia((prev) => prev.filter((entry) => entry.id !== id));
+    setAlbums((prev) => prev.map((album) => ({
+      ...album,
+      mediaIds: album.mediaIds.filter((mediaId) => mediaId !== id),
+    })));
+  }, [media, setMedia, setAlbums]);
 
   const handleUpload = useCallback((items: MediaItem[]) => {
     setMedia(prev => [...items, ...prev]);
@@ -136,14 +203,28 @@ const App: React.FC = () => {
     setAlbums(prev => prev.filter(a => a.id !== albumId));
   }, [setAlbums]);
 
-  const handleClearData = useCallback(() => {
-    if (window.confirm('This will delete ALL your media and albums. This cannot be undone. Are you sure?')) {
-      setMedia([]);
-      setAlbums([]);
-      localStorage.removeItem('lumina-media');
-      localStorage.removeItem('lumina-albums');
+  const handleClearData = useCallback(async () => {
+    if (!window.confirm('This will delete ALL your media and albums. This cannot be undone. Are you sure?')) {
+      return;
     }
-  }, [setMedia, setAlbums]);
+
+    const uploadedItems = media.filter((item) => item.storageProvider === 'b2' && item.b2Key);
+    setMedia([]);
+    setAlbums([]);
+    localStorage.removeItem('lumina-media');
+    localStorage.removeItem('lumina-albums');
+
+    await Promise.all(uploadedItems.map(async (item) => {
+      try {
+        await Promise.all([
+          deleteB2File(item.b2Key!),
+          deleteStoredMediaItem(item.id),
+        ]);
+      } catch (error) {
+        console.error('Could not fully clear Backblaze B2 data:', error);
+      }
+    }));
+  }, [media, setMedia, setAlbums]);
 
   const totalStorage = useMemo(() => {
     const bytes = media.reduce((acc, m) => acc + (m.size || 0), 0);
@@ -178,7 +259,7 @@ const App: React.FC = () => {
         setActiveTab={handleTabChange} 
         onUpload={() => setShowUploadModal(true)}
         onCreateAlbum={() => setShowCreateAlbumModal(true)}
-        onClearData={handleClearData}
+        onClearData={() => { void handleClearData(); }}
         mediaCount={media.length}
         storageUsed={totalStorage}
       />
