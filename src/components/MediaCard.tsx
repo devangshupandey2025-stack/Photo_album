@@ -17,8 +17,8 @@ const MediaCard: React.FC<MediaCardProps> = ({ item, onClick, onToggleFavorite }
       layout
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
-      whileHover={{ y: -4 }}
-      className="group relative aspect-square rounded-2xl overflow-hidden cursor-pointer bg-zinc-900 shadow-xl ring-1 ring-white/10"
+      whileHover={{ y: -6 }}
+      className="group relative aspect-square rounded-2xl overflow-hidden cursor-pointer bg-zinc-900 shadow-xl ring-1 ring-white/10 hover:shadow-[0_10px_40px_rgba(99,102,241,0.2)] hover:ring-indigo-500/30 transition-all duration-500 ease-out"
       onClick={() => !item.isLocked && onClick(item)}
     >
       <img 

@@ -264,16 +264,16 @@ const App: React.FC = () => {
         storageUsed={totalStorage}
       />
       
-      <main className="flex-1 ml-64 p-8 min-h-screen">
+      <main className="flex-1 md:ml-64 px-4 sm:px-8 pt-8 pb-32 md:pb-8 min-h-screen relative">
         {/* Header */}
-        <header className="flex items-center justify-between mb-12">
-          <div className="flex items-center gap-6">
+        <header className="sticky top-0 z-40 -mx-4 sm:-mx-8 px-4 sm:px-8 py-4 mb-8 glass-panel border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
             {activeAlbumId && (
               <button 
                 onClick={() => setActiveAlbumId(null)}
-                className="p-3 rounded-2xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white transition-all border border-white/5"
+                className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-all border border-white/5 shadow-sm"
               >
-                <ArrowLeft size={24} />
+                <ArrowLeft size={20} />
               </button>
             )}
             <div>
@@ -286,15 +286,15 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="relative group">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <div className="relative group flex-1 sm:flex-none">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-indigo-400 transition-colors" size={18} />
               <input 
                 type="text" 
-                placeholder="Search your library..."
+                placeholder="Search library..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-zinc-900/50 border border-white/5 rounded-2xl py-2.5 pl-10 pr-10 w-72 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-all text-sm"
+                className="bg-black/20 border border-white/10 rounded-xl py-2.5 pl-10 pr-10 w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500/50 transition-all text-sm backdrop-blur-sm shadow-inner"
               />
               {searchQuery && (
                 <button 
@@ -306,19 +306,18 @@ const App: React.FC = () => {
               )}
             </div>
             
-            {/* Grid size toggle */}
-            <div className="flex bg-zinc-900/50 rounded-2xl p-1 border border-white/5">
+            {/* Grid size toggle - hide on very small screens */}
+            <div className="hidden sm:flex bg-black/20 rounded-xl p-1 border border-white/10 backdrop-blur-sm shadow-inner">
               <button 
                 onClick={() => setGridSize('small')}
-                className={`p-2 rounded-xl transition-colors ${gridSize === 'small' ? 'bg-white/5 text-white' : 'text-zinc-500 hover:text-white'}`}
+                className={`p-1.5 rounded-lg transition-all ${gridSize === 'small' ? 'bg-white/10 text-white shadow-sm' : 'text-zinc-500 hover:text-white'}`}
                 title="Small Grid"
               >
                 <Grid3X3 size={18} />
               </button>
               <button 
                 onClick={() => setGridSize('large')}
-                className={`p-2 rounded-xl transition-colors ${gridSize === 'large' ? 'bg-white/5 text-white' : 'text-zinc-500 hover:text-white'}`}
-                title="Large Grid"
+                className={`p-1.5 rounded-lg transition-all ${gridSize === 'large' ? 'bg-white/10 text-white shadow-sm' : 'text-zinc-500 hover:text-white'}`}
               >
                 <Grid2X2 size={18} />
               </button>
@@ -328,8 +327,8 @@ const App: React.FC = () => {
             <div className="relative">
               <button 
                 onClick={() => { setShowSortMenu(!showSortMenu); setShowFilterMenu(false); }}
-                className={`p-2.5 rounded-2xl bg-zinc-900/50 border border-white/5 transition-all ${
-                  showSortMenu ? 'text-indigo-400 ring-1 ring-indigo-500/50' : 'text-zinc-400 hover:text-white'
+                className={`p-2.5 rounded-xl bg-black/20 border border-white/10 backdrop-blur-sm shadow-inner transition-all ${
+                  showSortMenu ? 'text-indigo-400 border-indigo-500/50 shadow-[0_0_15px_rgba(79,70,229,0.2)]' : 'text-zinc-400 hover:text-white hover:bg-white/5'
                 }`}
                 title="Sort"
               >
@@ -341,7 +340,7 @@ const App: React.FC = () => {
                     initial={{ opacity: 0, y: 8, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                    className="absolute right-0 top-12 w-48 bg-zinc-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
+                    className="absolute right-0 top-12 w-48 glass-panel rounded-2xl shadow-2xl shadow-black overflow-hidden z-50"
                   >
                     {SORT_OPTIONS.map((opt) => (
                       <button
@@ -365,8 +364,8 @@ const App: React.FC = () => {
             <div className="relative">
               <button 
                 onClick={() => { setShowFilterMenu(!showFilterMenu); setShowSortMenu(false); }}
-                className={`p-2.5 rounded-2xl bg-zinc-900/50 border border-white/5 transition-all ${
-                  showFilterMenu || filterType !== 'all' ? 'text-indigo-400 ring-1 ring-indigo-500/50' : 'text-zinc-400 hover:text-white'
+                className={`p-2.5 rounded-xl bg-black/20 border border-white/10 backdrop-blur-sm shadow-inner transition-all ${
+                  showFilterMenu || filterType !== 'all' ? 'text-indigo-400 border-indigo-500/50 shadow-[0_0_15px_rgba(79,70,229,0.2)]' : 'text-zinc-400 hover:text-white hover:bg-white/5'
                 }`}
                 title="Filter"
               >
@@ -378,7 +377,7 @@ const App: React.FC = () => {
                     initial={{ opacity: 0, y: 8, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                    className="absolute right-0 top-12 w-48 bg-zinc-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
+                    className="absolute right-0 top-12 w-48 glass-panel rounded-2xl shadow-2xl shadow-black overflow-hidden z-50"
                   >
                     {FILTER_OPTIONS.map((opt) => (
                       <button

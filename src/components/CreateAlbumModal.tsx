@@ -50,14 +50,14 @@ const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({ isOpen, onClose, on
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+        className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4"
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
         <motion.div
-          initial={{ opacity: 0, scale: 0.9, y: 20 }}
+          initial={{ opacity: 0, scale: 0.95, y: 40 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.9, y: 20 }}
-          className="w-full max-w-2xl bg-zinc-900 border border-white/10 rounded-[2rem] shadow-2xl overflow-hidden max-h-[85vh] flex flex-col"
+          exit={{ opacity: 0, scale: 0.95, y: 40 }}
+          className="w-full sm:max-w-2xl glass-panel rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl shadow-black overflow-hidden max-h-[90vh] sm:max-h-[85vh] flex flex-col"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-8 pt-8 pb-4 flex-shrink-0">
