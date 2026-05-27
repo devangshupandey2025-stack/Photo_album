@@ -5,6 +5,8 @@ export interface MediaItem {
   id: string;
   url: string;
   thumbnail?: string;
+  b2Key?: string;
+  storageProvider?: 'local' | 'b2';
   type: MediaType;
   title: string;
   date: string;

@@ -11,6 +11,7 @@ import { useLocalStorage } from './hooks/useLocalStorage';
 import { mockMedia, mockAlbums } from './mockData';
 import { MediaItem, Album, SortOption, GridSize } from './types';
 import { formatFileSize } from './utils/fileHelpers';
+import { deleteB2File } from './utils/b2Api';
 import { Search, Grid3X3, Grid2X2, SortDesc, Filter, ArrowLeft, X, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -104,13 +105,22 @@ const App: React.FC = () => {
     setMedia(prev => prev.map(m => m.id === id ? { ...m, isLocked: !m.isLocked } : m));
   };
 
-  const deleteMedia = (id: string) => {
+  const deleteMedia = async (id: string) => {
+    const item = media.find(m => m.id === id);
     setMedia(prev => prev.filter(m => m.id !== id));
     // Also remove from albums
     setAlbums(prev => prev.map(a => ({
       ...a,
       mediaIds: a.mediaIds.filter(mid => mid !== id),
     })));
+
+    if (item?.b2Key) {
+      try {
+        await deleteB2File(item.b2Key);
+      } catch (error) {
+        console.error('Could not delete file from Backblaze B2:', error);
+      }
+    }
   };
 
   const handleUpload = useCallback((items: MediaItem[]) => {

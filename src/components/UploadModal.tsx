@@ -4,6 +4,7 @@ import { X, UploadCloud, FileImage, Film, CheckCircle2, AlertCircle } from 'luci
 import { motion, AnimatePresence } from 'framer-motion';
 import { MediaItem } from '../types';
 import { getMediaType, fileToDataUrl, generateVideoThumbnail, generateId, formatFileSize } from '../utils/fileHelpers';
+import { uploadFilesToB2 } from '../utils/b2Api';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -18,6 +19,7 @@ interface PendingFile {
   type: 'image' | 'video';
   status: 'pending' | 'processing' | 'done' | 'error';
   title: string;
+  error?: string;
 }
 
 const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) => {
@@ -91,45 +93,55 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
 
     const mediaItems: MediaItem[] = [];
 
-    for (const pf of pendingFiles) {
-      setPendingFiles(prev => prev.map(f => f.id === pf.id ? { ...f, status: 'processing' } : f));
-      
-      try {
-        const url = await fileToDataUrl(pf.file);
+    setPendingFiles(prev => prev.map(f => ({ ...f, status: 'processing', error: undefined })));
+
+    try {
+      const uploadedFiles = await uploadFilesToB2(pendingFiles.map(pf => pf.file));
+
+      for (let i = 0; i < pendingFiles.length; i += 1) {
+        const pf = pendingFiles[i];
+        const uploaded = uploadedFiles[i];
         let thumbnail: string | undefined;
-        
+
         if (pf.type === 'video') {
-          thumbnail = await generateVideoThumbnail(url);
+          const localUrl = URL.createObjectURL(pf.file);
+          thumbnail = await generateVideoThumbnail(localUrl);
+          URL.revokeObjectURL(localUrl);
         }
 
         mediaItems.push({
           id: pf.id,
-          url,
+          url: uploaded.url,
           thumbnail,
+          b2Key: uploaded.key,
+          storageProvider: 'b2',
           type: pf.type,
           title: pf.title || pf.file.name,
           date: new Date().toISOString().split('T')[0],
-          location: 'Local Upload',
+          location: 'Backblaze B2',
           isFavorite: false,
           isLocked: false,
           size: pf.file.size,
         });
 
         setPendingFiles(prev => prev.map(f => f.id === pf.id ? { ...f, status: 'done' } : f));
-      } catch {
-        setPendingFiles(prev => prev.map(f => f.id === pf.id ? { ...f, status: 'error' } : f));
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Upload failed.';
+      setPendingFiles(prev => prev.map(f => ({ ...f, status: 'error', error: message })));
     }
 
     if (mediaItems.length > 0) {
       onUpload(mediaItems);
-    }
 
-    setTimeout(() => {
-      setPendingFiles([]);
+      setTimeout(() => {
+        setPendingFiles([]);
+        setIsUploading(false);
+        onClose();
+      }, 800);
+    } else {
       setIsUploading(false);
-      onClose();
-    }, 800);
+    }
   };
 
   if (!isOpen) return null;
@@ -235,6 +247,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
                         <span>•</span>
                         <span>{formatFileSize(pf.file.size)}</span>
                       </div>
+                      {pf.error && (
+                        <p className="text-xs text-red-400 mt-1 px-1">{pf.error}</p>
+                      )}
                     </div>
 
                     {/* Status */}
@@ -262,7 +277,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) 
           {/* Footer */}
           <div className="px-8 py-6 border-t border-white/5 flex items-center justify-between">
             <p className="text-xs text-zinc-500">
-              Files are stored locally in your browser
+              Files are uploaded to Backblaze B2
             </p>
             <div className="flex gap-3">
               <button

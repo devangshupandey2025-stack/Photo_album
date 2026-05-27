@@ -1,6 +1,6 @@
 # 📸 Lumina — Modern Media Vault
 
-A **fully functional**, premium photo & video gallery app built with React + Vite + TailwindCSS. Everything runs **100% in your browser** — no backend, no API keys, no sign-ups.
+A premium photo & video gallery app built with React + Vite + TailwindCSS, now wired for Backblaze B2 cloud storage through a small local Node API.
 
 ---
 
@@ -8,7 +8,7 @@ A **fully functional**, premium photo & video gallery app built with React + Vit
 
 Lumina is a local-first media vault that lets you:
 
-- **Upload** real photos/videos from your device (drag & drop or file picker)
+- **Upload** real photos/videos from your device to Backblaze B2
 - **Browse** them in a beautiful dark-mode gallery
 - **Organize** media into albums you create
 - **Search, sort, & filter** your library
@@ -17,7 +17,7 @@ Lumina is a local-first media vault that lets you:
 - **Share** links (or copy to clipboard on desktop)
 - **View** media in a full-screen lightbox with keyboard navigation
 
-**All data lives in your browser's `localStorage`.** Nothing leaves your machine. Close the tab and your stuff is still there when you come back.
+Media files are stored in Backblaze B2. Gallery metadata such as titles, favorites, albums, and vault state still lives in your browser's `localStorage`.
 
 ---
 
@@ -46,14 +46,18 @@ Photo_album/
 │   │   └── useLocalStorage.ts  ← Persistent state in localStorage
 │   └── utils/
 │       ├── cn.ts           ← Tailwind class merger (clsx + twMerge)
-│       └── fileHelpers.ts  ← File utilities (upload, download, share, etc.)
+│       ├── b2Api.ts        ← Browser API client for the local B2 server
+│       └── fileHelpers.ts  ← File utilities (download, share, etc.)
+└── server/
+    └── server.mjs          ← Backblaze B2 upload/read/delete API
 ```
 
 ### Data Flow
 
 ```
 User uploads file
-    → UploadModal reads file as Data URL (base64)
+    → UploadModal sends file to /api/upload
+    → server/server.mjs uploads the file to Backblaze B2
     → Creates MediaItem object with metadata
     → Saves to localStorage via useLocalStorage hook
     → App.tsx re-renders gallery with new item
@@ -79,10 +83,17 @@ User clicks photo
 cd Photo_album
 npm install
 
-# 2. Start dev server
+# 2. Configure Backblaze B2
+copy .env.example .env
+# Edit .env and add your B2 bucket, region, key ID, and application key.
+
+# 3. Start the B2 API in one terminal
+npm run server
+
+# 4. Start Vite in another terminal
 npm run dev
 
-# 3. Open in browser
+# 5. Open in browser
 #    → http://localhost:5173
 ```
 
@@ -90,10 +101,11 @@ npm run dev
 
 ```bash
 npm run build
-# Output: dist/index.html (single file, self-contained)
+npm start
+# App + API run at http://localhost:8787
 ```
 
-The `vite-plugin-singlefile` bundles everything into one HTML file you can share or host anywhere.
+The production server serves `dist/index.html` and the `/api` routes from the same origin.
 
 ---
 
@@ -136,9 +148,9 @@ The "Secure Vault" tab locks selected media behind a PIN screen.
 
 ## 💾 Storage Notes
 
-- All media is stored as **base64 Data URLs** in `localStorage`
-- `localStorage` has a ~5-10 MB limit in most browsers
-- For heavy use, you'd want to swap to IndexedDB (not implemented yet)
+- Uploaded media is stored in Backblaze B2
+- `localStorage` stores only metadata and thumbnails for video previews
+- B2 credentials stay in `.env` on the Node server and are never exposed to the browser
 - Click **"Clear"** in the sidebar to wipe all data and start fresh
 - The app ships with demo Unsplash images — these are URLs (not stored locally)
 
